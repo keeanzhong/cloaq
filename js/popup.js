@@ -1,13 +1,11 @@
-import { detachDebugger } from './debugger.js'
 import locationsConfigurations from './locationsConfigurations.js'
-import countryLocales from './countryLocales.js'
 import {
   applyPopupTranslations,
   detectUiLanguage,
   getSupportedUiLanguage,
 } from './i18n.js'
+import { buildIpConfiguration, buildLanguagesForLocale } from './configurationUtils.js'
 import { fetchIpProfile } from './ipLookup.js'
-import { buildLanguageList, formatLanguageList } from './languageUtils.js'
 
 const extensionVersion = chrome.runtime.getManifest().version
 document.getElementById('extensionVersion').textContent = `v${extensionVersion}`
@@ -38,29 +36,6 @@ Object.entries(locationsConfigurations).forEach(([key, location]) => {
   locationsOptGroup.appendChild(option)
 })
 
-const getCountryLocale = (countryCode) =>
-  countryLocales[countryCode] || countryLocales[countryCode?.toUpperCase()]
-
-const buildLanguagesForLocale = (locale, providerLanguages = '') =>
-  formatLanguageList(buildLanguageList(locale, providerLanguages))
-
-const getIpConfiguration = () => {
-  if (!ipProfile) return null
-
-  const locale =
-    getCountryLocale(ipProfile.countryCode) ||
-    buildLanguageList(null, ipProfile.languages)[0] ||
-    ''
-
-  return {
-    timezone: ipProfile.timezone,
-    locale,
-    languages: buildLanguagesForLocale(locale, ipProfile.languages),
-    lat: ipProfile.lat,
-    lon: ipProfile.lon,
-  }
-}
-
 const refreshIpProfile = async () => {
   ipProfile = await fetchIpProfile()
   return ipProfile
@@ -69,7 +44,7 @@ const refreshIpProfile = async () => {
 const applyIpConfiguration = async () => {
   if (!ipProfile) await refreshIpProfile()
 
-  const ipConfiguration = getIpConfiguration()
+  const ipConfiguration = buildIpConfiguration(ipProfile)
   if (ipConfiguration) {
     setInputs(
       ipConfiguration.timezone,
@@ -126,7 +101,6 @@ const setInputs = (timezone, locale, languages, lat, lon) => {
 }
 
 const saveToStorage = async () => {
-  detachDebugger()
   await chrome.storage.local.set({
     configuration: configurationSelect.value,
     timezone: timeZoneInput.value || null,

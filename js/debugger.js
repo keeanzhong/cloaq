@@ -9,14 +9,14 @@ const toFiniteNumber = (value) => {
 }
 
 const sendCommand = (tabId, command, params = {}, callback = null) => {
-  chrome.debugger.sendCommand({ tabId }, command, params, () => {
+  chrome.debugger.sendCommand({ tabId }, command, params, (result) => {
     if (chrome.runtime.lastError) {
       console.warn(`${command} failed: ${chrome.runtime.lastError.message}`)
-      callback?.(false)
+      callback?.(false, null)
       return
     }
 
-    callback?.(true)
+    callback?.(true, result)
   })
 }
 
@@ -45,6 +45,18 @@ const buildNavigatorLanguageScript = (languages) => `
 })();
 `
 
+const hasDebuggerConfiguration = (timezone, locale, lat, lon, languages) => {
+  const latitude = toFiniteNumber(lat)
+  const longitude = toFiniteNumber(lon)
+
+  return Boolean(
+    timezone ||
+      locale ||
+      parseLanguageList(languages).length ||
+      (latitude !== null && longitude !== null)
+  )
+}
+
 const applyLanguageOverrides = (tabId, languages) => {
   const languageList = parseLanguageList(languages)
   if (!languageList.length) return
@@ -58,6 +70,7 @@ const applyLanguageOverrides = (tabId, languages) => {
       },
     })
   })
+
   const languageScript = buildNavigatorLanguageScript(languageList)
   sendCommand(
     tabId,
@@ -76,72 +89,69 @@ const applyLanguageOverrides = (tabId, languages) => {
   )
 }
 
-const attachDebugger = (tabId, timezone, locale, lat, lon, languages) => {
+const applyDebuggerOverrides = (tabId, timezone, locale, lat, lon, languages) => {
   const latitude = toFiniteNumber(lat)
   const longitude = toFiniteNumber(lon)
   const hasCoordinates = latitude !== null && longitude !== null
-  const hasLanguageOverrides = parseLanguageList(languages).length > 0
 
-  if (timezone || locale || hasCoordinates || hasLanguageOverrides) {
-    chrome.debugger.attach({ tabId: tabId }, '1.3', () => {
-      if (!chrome.runtime.lastError) {
-        if (timezone) {
-          chrome.debugger.sendCommand(
-            { tabId: tabId },
-            'Emulation.setTimezoneOverride',
-            {
-              timezoneId: timezone,
-            },
-            () => {
-              if (
-                chrome.runtime.lastError &&
-                chrome.runtime.lastError.message?.includes(
-                  'Timezone override is already in effect'
-                )
-              ) {
-                chrome.debugger.detach({ tabId })
-              }
-            }
-          )
-        }
-
-        if (hasCoordinates) {
-          sendCommand(tabId, 'Emulation.setGeolocationOverride', {
-            latitude,
-            longitude,
-            accuracy: 1,
-          })
-        }
-
-        if (locale) {
-          sendCommand(tabId, 'Emulation.setLocaleOverride', {
-            locale,
-          })
-        }
-
-        applyLanguageOverrides(tabId, languages)
-      }
+  if (timezone) {
+    sendCommand(tabId, 'Emulation.setTimezoneOverride', {
+      timezoneId: timezone,
     })
   }
+
+  if (hasCoordinates) {
+    sendCommand(tabId, 'Emulation.setGeolocationOverride', {
+      latitude,
+      longitude,
+      accuracy: 1,
+    })
+  }
+
+  if (locale) {
+    sendCommand(tabId, 'Emulation.setLocaleOverride', {
+      locale,
+    })
+  }
+
+  applyLanguageOverrides(tabId, languages)
+}
+
+const attachDebugger = (tabId, timezone, locale, lat, lon, languages) => {
+  if (!hasDebuggerConfiguration(timezone, locale, lat, lon, languages)) return
+
+  chrome.debugger.attach({ tabId }, '1.3', () => {
+    if (chrome.runtime.lastError) {
+      const message = chrome.runtime.lastError.message || ''
+      if (message.toLowerCase().includes('already attached')) {
+        applyDebuggerOverrides(tabId, timezone, locale, lat, lon, languages)
+      } else {
+        console.warn(`Debugger attach failed: ${message}`)
+      }
+      return
+    }
+
+    applyDebuggerOverrides(tabId, timezone, locale, lat, lon, languages)
+  })
+}
+
+const detachDebuggerForTab = (tabId) => {
+  chrome.debugger.sendCommand(
+    { tabId },
+    'Emulation.clearGeolocationOverride',
+    {},
+    () => chrome.debugger.detach({ tabId }, () => {})
+  )
 }
 
 const detachDebugger = () => {
   chrome.debugger.getTargets((tabs) => {
     for (const tab in tabs) {
       if (tabs[tab].attached && tabs[tab].tabId) {
-        chrome.debugger.sendCommand(
-          { tabId: tabs[tab].tabId },
-          'Emulation.clearGeolocationOverride',
-          {
-            autoAttach: true,
-            waitForDebuggerOnStart: false,
-            flatten: true,
-          }
-        )
-        chrome.debugger.detach({ tabId: tabs[tab].tabId })
+        detachDebuggerForTab(tabs[tab].tabId)
       }
     }
   })
 }
 
-export { attachDebugger, detachDebugger }
+export { attachDebugger, detachDebugger, detachDebuggerForTab }

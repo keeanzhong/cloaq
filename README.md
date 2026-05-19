@@ -117,6 +117,7 @@ gh repo edit keeanzhong/cloaq --visibility private --accept-visibility-change-co
 
 - `debugger`：用于通过 Chrome Debugger API 修改时区、地理位置、区域格式、语言和请求头。
 - `webNavigation`：用于在页面导航时重新附加调试配置。
+- `tabs`：用于在标签页创建、切换、刷新和跳转时尽早应用配置，减少页面先读取真实本机环境的窗口。
 - `storage`：用于保存配置、界面语言和手动填写的参数。
 
 ## 许可证
