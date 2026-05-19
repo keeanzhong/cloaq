@@ -10,12 +10,17 @@ const SETTINGS_KEYS = [
   'lat',
   'lon',
   'ipUpdatedAt',
+  'ipAddress',
+  'ipCountryCode',
 ]
-const IP_REFRESH_INTERVAL_MS = 5 * 60 * 1000
+const IP_REFRESH_INTERVAL_MS = 5 * 1000
+const IP_POLL_ALARM_NAME = 'cloaq-ip-profile-poll'
+const IP_POLL_INTERVAL_MINUTES = 0.5
 const APPLY_DEBOUNCE_MS = 150
 
 let applyAllTabsTimer = null
 let ipRefreshPromise = null
+let lastIpChangeReloadAt = 0
 
 const isConfigurableUrl = (url = '') =>
   !url ||
@@ -25,25 +30,81 @@ const isConfigurableUrl = (url = '') =>
 
 const getStoredSettings = () => chrome.storage.local.get(SETTINGS_KEYS)
 
-const saveIpConfiguration = async (ipProfile) => {
+const buildStoredIpConfiguration = (ipProfile) => {
   const ipConfiguration = buildIpConfiguration(ipProfile)
   if (!ipConfiguration) return null
 
-  await chrome.storage.local.set({
+  return {
     ...ipConfiguration,
     ipUpdatedAt: Date.now(),
     ipSource: ipProfile.source || null,
     ipAddress: ipProfile.ip || null,
     ipCountryCode: ipProfile.countryCode || null,
-  })
-
-  return ipConfiguration
+  }
 }
 
-const refreshIpConfiguration = async () => {
+const hasIpConfigurationChanged = (currentSettings, nextSettings) => {
+  if (!nextSettings) return false
+
+  return [
+    'timezone',
+    'locale',
+    'languages',
+    'lat',
+    'lon',
+    'ipAddress',
+    'ipCountryCode',
+  ].some(
+    (key) => String(currentSettings?.[key] ?? '') !== String(nextSettings[key] ?? '')
+  )
+}
+
+const saveIpConfiguration = async (ipProfile) => {
+  const currentSettings = await getStoredSettings()
+  const nextSettings = buildStoredIpConfiguration(ipProfile)
+  if (!nextSettings) return null
+
+  const changed = hasIpConfigurationChanged(currentSettings, nextSettings)
+
+  await chrome.storage.local.set(nextSettings)
+
+  return {
+    changed,
+    settings: nextSettings,
+  }
+}
+
+const reloadConfigurableTabs = async () => {
+  if (Date.now() - lastIpChangeReloadAt < 3000) return
+  lastIpChangeReloadAt = Date.now()
+
+  const tabs = await chrome.tabs.query({})
+  await Promise.all(
+    tabs
+      .filter((tab) => tab.id && isConfigurableUrl(tab.url))
+      .map(
+        (tab) =>
+          new Promise((resolve) => {
+            chrome.tabs.reload(tab.id, {}, () => resolve())
+          })
+      )
+  )
+}
+
+const refreshIpConfiguration = async ({ reloadOnChange = false } = {}) => {
   if (!ipRefreshPromise) {
     ipRefreshPromise = fetchIpProfile()
       .then(saveIpConfiguration)
+      .then(async (result) => {
+        if (result?.changed) {
+          scheduleApplySettingsToAllTabs()
+          if (reloadOnChange) {
+            await reloadConfigurableTabs()
+          }
+        }
+
+        return result?.settings || null
+      })
       .catch((error) => {
         console.error(error.message)
         return null
@@ -63,17 +124,18 @@ const getEffectiveSettings = async () => {
 
   const hasStoredIpConfiguration = hasSpoofingConfiguration(settings)
   const isStale =
-    !settings.ipUpdatedAt || Date.now() - settings.ipUpdatedAt > IP_REFRESH_INTERVAL_MS
+    !settings.ipUpdatedAt ||
+    Date.now() - settings.ipUpdatedAt > IP_REFRESH_INTERVAL_MS
 
   if (!hasStoredIpConfiguration) {
     return {
       ...settings,
-      ...(await refreshIpConfiguration()),
+      ...(await refreshIpConfiguration({ reloadOnChange: false })),
     }
   }
 
   if (isStale) {
-    refreshIpConfiguration()
+    refreshIpConfiguration({ reloadOnChange: true })
   }
 
   return settings
@@ -116,9 +178,15 @@ const scheduleApplySettingsToAllTabs = () => {
 const handleStartup = async () => {
   const settings = await getStoredSettings()
   if (settings.configuration === 'ipAddress') {
-    refreshIpConfiguration()
+    refreshIpConfiguration({ reloadOnChange: true })
   }
   scheduleApplySettingsToAllTabs()
+}
+
+const ensureIpPollingAlarm = () => {
+  chrome.alarms.create(IP_POLL_ALARM_NAME, {
+    periodInMinutes: IP_POLL_INTERVAL_MINUTES,
+  })
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -129,10 +197,20 @@ chrome.runtime.onInstalled.addListener((details) => {
     })
   }
 
+  ensureIpPollingAlarm()
   handleStartup()
 })
 
 chrome.runtime.onStartup.addListener(handleStartup)
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== IP_POLL_ALARM_NAME) return
+
+  const settings = await getStoredSettings()
+  if (settings.configuration === 'ipAddress') {
+    refreshIpConfiguration({ reloadOnChange: true })
+  }
+})
 
 chrome.tabs.onCreated.addListener((tab) => {
   if (tab.id && isConfigurableUrl(tab.url)) {
@@ -176,7 +254,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     return
   }
 
+  if (changes.configuration?.newValue === 'ipAddress') {
+    refreshIpConfiguration({ reloadOnChange: true })
+  }
+
   scheduleApplySettingsToAllTabs()
 })
 
+ensureIpPollingAlarm()
 handleStartup()
