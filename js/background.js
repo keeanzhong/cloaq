@@ -10,20 +10,24 @@ chrome.runtime.onInstalled.addListener((details) => {
 })
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-  chrome.storage.local.get(['timezone', 'locale', 'lat', 'lon'], (storage) => {
-    chrome.debugger.getTargets((tabs) => {
-      const currentTab = tabs.find((obj) => obj.tabId === details.tabId)
-      if (!currentTab?.attached) {
-        attachDebugger(
-          details.tabId,
-          storage.timezone,
-          storage.locale,
-          storage.lat,
-          storage.lon
-        )
-      }
-    })
-  })
+  chrome.storage.local.get(
+    ['timezone', 'locale', 'lat', 'lon', 'languages'],
+    (storage) => {
+      chrome.debugger.getTargets((tabs) => {
+        const currentTab = tabs.find((obj) => obj.tabId === details.tabId)
+        if (!currentTab?.attached) {
+          attachDebugger(
+            details.tabId,
+            storage.timezone,
+            storage.locale,
+            storage.lat,
+            storage.lon,
+            storage.languages
+          )
+        }
+      })
+    }
+  )
 })
 
 // chrome.webNavigation.onCommitted.addListener((details) => {

@@ -1,6 +1,6 @@
 {
-  "extName": { "message": "Cloaq - Location Guard & Locale Switcher" },
+  "extName": { "message": "Cloaq - 位置防护与区域切换器" },
   "extDesc": {
-    "message": "Spoof time zone, geolocation & locale. Match your location data to your VPN's IP address."
+    "message": "伪装时区、地理位置、区域格式和语言，并让这些数据匹配你的 VPN IP 地址。"
   }
 }

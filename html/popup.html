@@ -12,45 +12,74 @@
   <header class="flex justify-between items-center px-5 py-4 border-b border-borderLight">
     <img src="../img/logo.svg" alt="Cloaq Logo" class="h-6">
     <div class="flex gap-5">
-      <button id="reloadButton" title="Reload current page">
-        <img src="../img/reload.svg" alt="Reload" class="w-5">
+      <button id="reloadButton" title="Reload current page" data-i18n-title="reloadTitle">
+        <img src="../img/reload.svg" alt="Reload" class="w-5" data-i18n-alt="reloadTitle">
       </button>
-      <button id="infoButton" title="Info">
-        <img src="../img/info.svg" alt="Info" class="w-5">
+      <button id="infoButton" title="Info" data-i18n-title="infoTitle">
+        <img src="../img/info.svg" alt="Info" class="w-5" data-i18n-alt="infoTitle">
       </button>
     </div>
   </header>
 
   <main class="flex flex-col gap-5 p-5">
     <div>
-      <h2 class="section-title">Configuration</h2>
+      <h2 class="section-title" data-i18n="uiLanguage">UI Language</h2>
+      <select name="uiLanguage"
+        class="appearance-none cursor-pointer w-full py-2 px-3 border border-borderDark bg-transparent rounded h-[38px] focus:outline-none focus:border-purple bg-[url('/img/arrow.svg')] bg-no-repeat bg-[right_0.75rem_center] bg-[length:1rem]">
+        <option value="en">English</option>
+        <option value="zh-CN">简体中文</option>
+      </select>
+    </div>
+
+    <div>
+      <h2 class="section-title" data-i18n="configuration">Configuration</h2>
       <select name="configuration"
         class="appearance-none cursor-pointer w-full py-2 px-3 border border-borderDark bg-transparent rounded h-[38px] focus:outline-none focus:border-purple bg-[url('/img/arrow.svg')] bg-no-repeat bg-[right_0.75rem_center] bg-[length:1rem]">
-        <option value="browserDefault">Browser Default</option>
-        <option value="custom">Custom</option>
-        <option value="ipAddress">Match IP Address</option>
-        <optgroup label="Locations" id="locationsOptGroup">
+        <option value="browserDefault" data-i18n="browserDefault">Browser Default</option>
+        <option value="custom" data-i18n="custom">Custom</option>
+        <option value="ipAddress" data-i18n="ipAddress">Match IP Address</option>
+        <optgroup label="Locations" id="locationsOptGroup" data-i18n-label="locations">
         </optgroup>
       </select>
     </div>
 
     <div>
-      <h2 class="section-title">Time Zone</h2>
+      <h2 class="section-title" data-i18n="timeZone">Time Zone</h2>
       <input type="text" name="timeZone" class="input">
     </div>
 
     <div>
-      <h2 class="section-title">Locale</h2>
+      <h2 class="section-title" data-i18n="locale">Locale</h2>
       <input type="text" name="locale" class="input">
+    </div>
+
+    <div>
+      <h2 class="section-title" data-i18n="languages">Languages</h2>
+      <input type="text" name="languages" class="input" list="languageOptions" placeholder="en-US,en"
+        data-i18n-placeholder="languagesPlaceholder">
+      <datalist id="languageOptions">
+        <option value="en-US,en"></option>
+        <option value="zh-CN,zh"></option>
+        <option value="zh-TW,zh"></option>
+        <option value="ja-JP,ja"></option>
+        <option value="ko-KR,ko"></option>
+        <option value="es-ES,es"></option>
+        <option value="fr-FR,fr"></option>
+        <option value="de-DE,de"></option>
+        <option value="pt-BR,pt"></option>
+        <option value="ru-RU,ru"></option>
+        <option value="ar-SA,ar"></option>
+        <option value="hi-IN,hi"></option>
+      </datalist>
     </div>
 
     <div class="flex gap-5">
       <div>
-        <h2 class="section-title">Latitude</h2>
+        <h2 class="section-title" data-i18n="latitude">Latitude</h2>
         <input type="number" name="latitude" class="input">
       </div>
       <div>
-        <h2 class="section-title">Longitude</h2>
+        <h2 class="section-title" data-i18n="longitude">Longitude</h2>
         <input type="number" name="longitude" class="input">
       </div>
     </div>
@@ -67,9 +96,9 @@
 
   <footer class="flex justify-between items-center px-5 py-4 border-t border-borderLight">
     <a href="https://chromewebstore.google.com/detail/fcalilbnpkfikdppppppchmkdipibalb/reviews" target="_blank"
-      class="footer-link">Rate Us</a>
-    <a href="mailto:cloqextension@proton.me" target="_blank" class="footer-link">Contact</a>
-    <a href="https://github.com/www1z4rd/cloaq" target="_blank" class="footer-link">Github</a>
+      class="footer-link" data-i18n="rateUs">Rate Us</a>
+    <a href="mailto:cloqextension@proton.me" target="_blank" class="footer-link" data-i18n="contact">Contact</a>
+    <a href="https://github.com/www1z4rd/cloaq" target="_blank" class="footer-link" data-i18n="github">Github</a>
     <div class="text-lightGrey" id="extensionVersion"></div>
   </footer>
   <script src="../js/popup.js" type="module"></script>

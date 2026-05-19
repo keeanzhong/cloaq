@@ -16,45 +16,45 @@
 
         <main class="flex flex-col gap-6 ">
             <div class="info-block">
-                <h2 class="info-block-title">Start Using Cloaq</h2>
-                <p>
-                    1. Pin the extension by opening your browser’s extensions menu (found by clicking the puzzle
-                    piece icon next to the address bar) and selecting the thumbtack icon.
+                <h2 class="info-block-title" data-i18n="startUsingTitle">Start Using Cloaq</h2>
+                <p data-i18n="startUsingStep1">
+                    1. Pin the extension by opening your browser's extensions menu and selecting the thumbtack icon.
                 </p>
-                <p>
-                    2. Click the extension icon on your toolbar (top right of the browser).
+                <p data-i18n="startUsingStep2">
+                    2. Click the extension icon on your toolbar.
                 </p>
-                <p>
+                <p data-i18n="startUsingStep3">
                     3. Adjust the options to your desired values.
                 </p>
             </div>
             <div class="info-block">
-                <h2 class="info-block-title">How Cloaq Works</h2>
-                <p>
+                <h2 class="info-block-title" data-i18n="howWorksTitle">How Cloaq Works</h2>
+                <p data-i18n="howWorksText">
                     Cloaq uses the chrome.debugger API to change data directly at the browser level, making it effective
-                    across all frames and web workers, unlike other extensions that rely on less reliable script
-                    injections. This approach ensures data modifications are undetectable and work consistently, even
-                    during the initial page load.
+                    across frames and web workers during the initial page load.
                 </p>
             </div>
             <div class="info-block">
-                <h2 class="info-block-title">IP Address</h2>
-                <p>
+                <h2 class="info-block-title" data-i18n="ipAddressTitle">IP Address</h2>
+                <p data-i18n="ipAddressText">
                     Cloaq does not change your IP address. To change your IP address you will need a VPN or proxy.
                 </p>
             </div>
             <div class="info-block">
-                <h2 class="info-block-title">Hide Debugging Notification Bar</h2>
-                <p>
+                <h2 class="info-block-title" data-i18n="debuggingTitle">Hide Debugging Notification Bar</h2>
+                <p data-i18n="debuggingText">
                     While the extension is on, a notification bar becomes visible. Hiding the bar can be done by using
-                    the
-                    --silent-debugger-extension-api flag. <a
-                        href="https://www.chromium.org/developers/how-tos/run-chromium-with-flags/" target="_blank"
-                        class="text-offBlack underline">Instructions on how to run chrome with flags.</a>
+                    the --silent-debugger-extension-api flag.
+                </p>
+                <p>
+                    <a href="https://www.chromium.org/developers/how-tos/run-chromium-with-flags/" target="_blank"
+                        class="text-offBlack underline" data-i18n="flagInstructions">Instructions on how to run Chrome
+                        with flags.</a>
                 </p>
             </div>
         </main>
     </div>
+    <script src="../js/info.js" type="module"></script>
 </body>
 
 </html>

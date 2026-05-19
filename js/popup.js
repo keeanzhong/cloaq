@@ -1,25 +1,34 @@
 import { detachDebugger } from './debugger.js'
 import locationsConfigurations from './locationsConfigurations.js'
 import countryLocales from './countryLocales.js'
+import {
+  applyPopupTranslations,
+  detectUiLanguage,
+  getSupportedUiLanguage,
+} from './i18n.js'
+import { fetchIpProfile } from './ipLookup.js'
+import { buildLanguageList, formatLanguageList } from './languageUtils.js'
 
 const extensionVersion = chrome.runtime.getManifest().version
 document.getElementById('extensionVersion').textContent = `v${extensionVersion}`
 
 const reloadButton = document.getElementById('reloadButton')
 const infoButton = document.getElementById('infoButton')
+const uiLanguageSelect = document.querySelector('select[name="uiLanguage"]')
 const configurationSelect = document.querySelector(
   'select[name="configuration"]'
 )
 const locationsOptGroup = document.getElementById('locationsOptGroup')
 const timeZoneInput = document.querySelector('input[name="timeZone"]')
 const localeInput = document.querySelector('input[name="locale"]')
+const languagesInput = document.querySelector('input[name="languages"]')
 const latitudeInput = document.querySelector('input[name="latitude"]')
 const longitudeInput = document.querySelector('input[name="longitude"]')
 // const debuggerApiModeCheckbox = document.querySelector(
 //   'input[name="debuggerApiMode"]'
 // )
 
-let ipData = null
+let ipProfile = null
 
 // Add location options to the select menu
 Object.entries(locationsConfigurations).forEach(([key, location]) => {
@@ -29,35 +38,59 @@ Object.entries(locationsConfigurations).forEach(([key, location]) => {
   locationsOptGroup.appendChild(option)
 })
 
-const fetchIpData = async () => {
-  try {
-    const response = await fetch(
-      'http://ip-api.com/json?fields=status,message,countryCode,lat,lon,timezone,query'
-    )
-    const data = await response.json()
-    if (data.status === 'success') {
-      ipData = data
-    } else {
-      console.error(`Failed to reload IP information: ${data.message}`)
-    }
-  } catch (error) {
-    console.error('Error fetching IP information:', error)
+const getCountryLocale = (countryCode) =>
+  countryLocales[countryCode] || countryLocales[countryCode?.toUpperCase()]
+
+const buildLanguagesForLocale = (locale, providerLanguages = '') =>
+  formatLanguageList(buildLanguageList(locale, providerLanguages))
+
+const getIpConfiguration = () => {
+  if (!ipProfile) return null
+
+  const locale =
+    getCountryLocale(ipProfile.countryCode) ||
+    buildLanguageList(null, ipProfile.languages)[0] ||
+    ''
+
+  return {
+    timezone: ipProfile.timezone,
+    locale,
+    languages: buildLanguagesForLocale(locale, ipProfile.languages),
+    lat: ipProfile.lat,
+    lon: ipProfile.lon,
   }
 }
 
-const handleConfigurationChange = () => {
+const refreshIpProfile = async () => {
+  ipProfile = await fetchIpProfile()
+  return ipProfile
+}
+
+const applyIpConfiguration = async () => {
+  if (!ipProfile) await refreshIpProfile()
+
+  const ipConfiguration = getIpConfiguration()
+  if (ipConfiguration) {
+    setInputs(
+      ipConfiguration.timezone,
+      ipConfiguration.locale,
+      ipConfiguration.languages,
+      ipConfiguration.lat,
+      ipConfiguration.lon
+    )
+  }
+}
+
+const handleConfigurationChange = async () => {
   const configuration = configurationSelect.value
 
   if (configuration === 'browserDefault' || configuration === 'custom') {
     clearInputs()
   } else if (configuration === 'ipAddress') {
-    if (ipData) {
-      setInputs(
-        ipData.timezone,
-        countryLocales[ipData.countryCode],
-        ipData.lat,
-        ipData.lon
-      )
+    try {
+      await applyIpConfiguration()
+    } catch (error) {
+      console.error(error.message)
     }
   } else {
     const selectedLocation = locationsConfigurations[configuration]
@@ -65,6 +98,7 @@ const handleConfigurationChange = () => {
       setInputs(
         selectedLocation.timezone,
         selectedLocation.locale,
+        buildLanguagesForLocale(selectedLocation.locale),
         selectedLocation.lat,
         selectedLocation.lon
       )
@@ -73,16 +107,22 @@ const handleConfigurationChange = () => {
     }
   }
 
-  saveToStorage()
+  await saveToStorage()
 }
 
-const clearInputs = () => setInputs('', '', '', '')
+const clearInputs = () => setInputs('', '', '', '', '')
 
-const setInputs = (timezone, locale, lat, lon) => {
+const formatCoordinateInput = (value) => {
+  if (value === '' || value === null || value === undefined) return ''
+  return Number.isFinite(Number(value)) ? value : ''
+}
+
+const setInputs = (timezone, locale, languages, lat, lon) => {
   timeZoneInput.value = timezone || ''
   localeInput.value = locale || ''
-  latitudeInput.value = lat || ''
-  longitudeInput.value = lon || ''
+  languagesInput.value = languages || ''
+  latitudeInput.value = formatCoordinateInput(lat)
+  longitudeInput.value = formatCoordinateInput(lon)
 }
 
 const saveToStorage = async () => {
@@ -91,10 +131,22 @@ const saveToStorage = async () => {
     configuration: configurationSelect.value,
     timezone: timeZoneInput.value || null,
     locale: localeInput.value || null,
-    lat: parseFloat(latitudeInput.value) || null,
-    lon: parseFloat(longitudeInput.value) || null,
+    languages: languagesInput.value || null,
+    lat: Number.isFinite(parseFloat(latitudeInput.value))
+      ? parseFloat(latitudeInput.value)
+      : null,
+    lon: Number.isFinite(parseFloat(longitudeInput.value))
+      ? parseFloat(longitudeInput.value)
+      : null,
     // useDebuggerApi: debuggerApiModeCheckbox.checked,
   })
+}
+
+const saveUiLanguage = async () => {
+  const uiLanguage = getSupportedUiLanguage(uiLanguageSelect.value)
+  uiLanguageSelect.value = uiLanguage
+  applyPopupTranslations(uiLanguage)
+  await chrome.storage.local.set({ uiLanguage })
 }
 
 const loadFromStorage = async () => {
@@ -103,12 +155,26 @@ const loadFromStorage = async () => {
       'configuration',
       'timezone',
       'locale',
+      'languages',
       'lat',
       'lon',
+      'uiLanguage',
       // 'useDebuggerApi',
     ])
+
+    uiLanguageSelect.value = getSupportedUiLanguage(
+      storage.uiLanguage || detectUiLanguage()
+    )
+    applyPopupTranslations(uiLanguageSelect.value)
+
     configurationSelect.value = storage.configuration || 'browserDefault'
-    setInputs(storage.timezone, storage.locale, storage.lat, storage.lon)
+    setInputs(
+      storage.timezone,
+      storage.locale,
+      storage.languages,
+      storage.lat,
+      storage.lon
+    )
     // debuggerApiModeCheckbox.checked = storage.useDebuggerApi || false
   } catch (error) {
     console.error('Error loading from storage:', error)
@@ -135,12 +201,19 @@ reloadButton.addEventListener('click', () => chrome.tabs.reload())
 infoButton.addEventListener('click', () =>
   chrome.tabs.create({ url: 'html/info.html' })
 )
+uiLanguageSelect.addEventListener('change', saveUiLanguage)
 configurationSelect.addEventListener('change', handleConfigurationChange)
 timeZoneInput.addEventListener('input', handleInputChange)
 localeInput.addEventListener('input', handleInputChange)
+languagesInput.addEventListener('input', handleInputChange)
 latitudeInput.addEventListener('input', handleInputChange)
 longitudeInput.addEventListener('input', handleInputChange)
 // debuggerApiModeCheckbox.addEventListener('change', saveToStorage)
 
 await loadFromStorage()
-await fetchIpData()
+
+if (configurationSelect.value === 'ipAddress') {
+  await handleConfigurationChange()
+} else {
+  refreshIpProfile().catch((error) => console.error(error.message))
+}
