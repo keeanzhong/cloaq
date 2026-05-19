@@ -20,6 +20,9 @@ const locationsOptGroup = document.getElementById('locationsOptGroup')
 const timeZoneInput = document.querySelector('input[name="timeZone"]')
 const localeInput = document.querySelector('input[name="locale"]')
 const languagesInput = document.querySelector('input[name="languages"]')
+const ipCheckIntervalInput = document.querySelector(
+  'input[name="ipCheckIntervalSeconds"]'
+)
 const latitudeInput = document.querySelector('input[name="latitude"]')
 const longitudeInput = document.querySelector('input[name="longitude"]')
 // const debuggerApiModeCheckbox = document.querySelector(
@@ -87,6 +90,12 @@ const handleConfigurationChange = async () => {
 
 const clearInputs = () => setInputs('', '', '', '', '')
 
+const normalizeIpCheckInterval = (value) => {
+  const interval = Number.parseInt(value, 10)
+  if (!Number.isFinite(interval)) return 5
+  return Math.min(Math.max(interval, 1), 300)
+}
+
 const formatCoordinateInput = (value) => {
   if (value === '' || value === null || value === undefined) return ''
   return Number.isFinite(Number(value)) ? value : ''
@@ -106,6 +115,9 @@ const saveToStorage = async () => {
     timezone: timeZoneInput.value || null,
     locale: localeInput.value || null,
     languages: languagesInput.value || null,
+    ipCheckIntervalSeconds: normalizeIpCheckInterval(
+      ipCheckIntervalInput.value
+    ),
     lat: Number.isFinite(parseFloat(latitudeInput.value))
       ? parseFloat(latitudeInput.value)
       : null,
@@ -130,6 +142,7 @@ const loadFromStorage = async () => {
       'timezone',
       'locale',
       'languages',
+      'ipCheckIntervalSeconds',
       'lat',
       'lon',
       'uiLanguage',
@@ -142,6 +155,9 @@ const loadFromStorage = async () => {
     applyPopupTranslations(uiLanguageSelect.value)
 
     configurationSelect.value = storage.configuration || 'browserDefault'
+    ipCheckIntervalInput.value = normalizeIpCheckInterval(
+      storage.ipCheckIntervalSeconds
+    )
     setInputs(
       storage.timezone,
       storage.locale,
@@ -180,6 +196,7 @@ configurationSelect.addEventListener('change', handleConfigurationChange)
 timeZoneInput.addEventListener('input', handleInputChange)
 localeInput.addEventListener('input', handleInputChange)
 languagesInput.addEventListener('input', handleInputChange)
+ipCheckIntervalInput.addEventListener('input', debouncedSaveToStorage)
 latitudeInput.addEventListener('input', handleInputChange)
 longitudeInput.addEventListener('input', handleInputChange)
 // debuggerApiModeCheckbox.addEventListener('change', saveToStorage)

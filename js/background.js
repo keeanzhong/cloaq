@@ -12,13 +12,16 @@ const SETTINGS_KEYS = [
   'ipUpdatedAt',
   'ipAddress',
   'ipCountryCode',
+  'ipCheckIntervalSeconds',
 ]
-const IP_REFRESH_INTERVAL_MS = 5 * 1000
+const DEFAULT_IP_CHECK_INTERVAL_SECONDS = 5
+const MIN_IP_CHECK_INTERVAL_SECONDS = 1
+const MAX_IP_CHECK_INTERVAL_SECONDS = 300
 const IP_POLL_ALARM_NAME = 'cloaq-ip-profile-poll'
-const IP_POLL_INTERVAL_MINUTES = 0.5
 const APPLY_DEBOUNCE_MS = 150
 
 let applyAllTabsTimer = null
+let ipCheckTimer = null
 let ipRefreshPromise = null
 let lastIpChangeReloadAt = 0
 
@@ -29,6 +32,16 @@ const isConfigurableUrl = (url = '') =>
   url.startsWith('file://')
 
 const getStoredSettings = () => chrome.storage.local.get(SETTINGS_KEYS)
+
+const getIpCheckIntervalSeconds = (settings = {}) => {
+  const value = Number(settings.ipCheckIntervalSeconds)
+  if (!Number.isFinite(value)) return DEFAULT_IP_CHECK_INTERVAL_SECONDS
+
+  return Math.min(
+    Math.max(value, MIN_IP_CHECK_INTERVAL_SECONDS),
+    MAX_IP_CHECK_INTERVAL_SECONDS
+  )
+}
 
 const buildStoredIpConfiguration = (ipProfile) => {
   const ipConfiguration = buildIpConfiguration(ipProfile)
@@ -43,18 +56,10 @@ const buildStoredIpConfiguration = (ipProfile) => {
   }
 }
 
-const hasIpConfigurationChanged = (currentSettings, nextSettings) => {
+const hasFingerprintConfigurationChanged = (currentSettings, nextSettings) => {
   if (!nextSettings) return false
 
-  return [
-    'timezone',
-    'locale',
-    'languages',
-    'lat',
-    'lon',
-    'ipAddress',
-    'ipCountryCode',
-  ].some(
+  return ['timezone', 'locale', 'languages', 'lat', 'lon'].some(
     (key) => String(currentSettings?.[key] ?? '') !== String(nextSettings[key] ?? '')
   )
 }
@@ -64,7 +69,10 @@ const saveIpConfiguration = async (ipProfile) => {
   const nextSettings = buildStoredIpConfiguration(ipProfile)
   if (!nextSettings) return null
 
-  const changed = hasIpConfigurationChanged(currentSettings, nextSettings)
+  const changed = hasFingerprintConfigurationChanged(
+    currentSettings,
+    nextSettings
+  )
 
   await chrome.storage.local.set(nextSettings)
 
@@ -117,15 +125,39 @@ const refreshIpConfiguration = async ({ reloadOnChange = false } = {}) => {
   return ipRefreshPromise
 }
 
+const scheduleNextIpCheck = (settings = {}) => {
+  clearTimeout(ipCheckTimer)
+
+  if (settings.configuration !== 'ipAddress') return
+
+  const intervalSeconds = getIpCheckIntervalSeconds(settings)
+  ipCheckTimer = setTimeout(() => {
+    runIpCheckCycle({ reloadOnChange: true })
+  }, intervalSeconds * 1000)
+}
+
+const runIpCheckCycle = async ({ reloadOnChange = true } = {}) => {
+  const settings = await getStoredSettings()
+  if (settings.configuration !== 'ipAddress') {
+    scheduleNextIpCheck(settings)
+    return null
+  }
+
+  const result = await refreshIpConfiguration({ reloadOnChange })
+  scheduleNextIpCheck(await getStoredSettings())
+  return result
+}
+
 const getEffectiveSettings = async () => {
   const settings = await getStoredSettings()
 
   if (settings.configuration !== 'ipAddress') return settings
 
   const hasStoredIpConfiguration = hasSpoofingConfiguration(settings)
+  const intervalMs = getIpCheckIntervalSeconds(settings) * 1000
   const isStale =
     !settings.ipUpdatedAt ||
-    Date.now() - settings.ipUpdatedAt > IP_REFRESH_INTERVAL_MS
+    Date.now() - settings.ipUpdatedAt > intervalMs
 
   if (!hasStoredIpConfiguration) {
     return {
@@ -178,14 +210,21 @@ const scheduleApplySettingsToAllTabs = () => {
 const handleStartup = async () => {
   const settings = await getStoredSettings()
   if (settings.configuration === 'ipAddress') {
-    refreshIpConfiguration({ reloadOnChange: true })
+    runIpCheckCycle({ reloadOnChange: true })
   }
+  scheduleNextIpCheck(settings)
   scheduleApplySettingsToAllTabs()
 }
 
-const ensureIpPollingAlarm = () => {
+const ensureIpPollingAlarm = async () => {
+  const settings = await getStoredSettings()
+  const intervalMinutes = Math.max(
+    getIpCheckIntervalSeconds(settings) / 60,
+    0.5
+  )
+
   chrome.alarms.create(IP_POLL_ALARM_NAME, {
-    periodInMinutes: IP_POLL_INTERVAL_MINUTES,
+    periodInMinutes: intervalMinutes,
   })
 }
 
@@ -206,10 +245,7 @@ chrome.runtime.onStartup.addListener(handleStartup)
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== IP_POLL_ALARM_NAME) return
 
-  const settings = await getStoredSettings()
-  if (settings.configuration === 'ipAddress') {
-    refreshIpConfiguration({ reloadOnChange: true })
-  }
+  runIpCheckCycle({ reloadOnChange: true })
 })
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -255,9 +291,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 
   if (changes.configuration?.newValue === 'ipAddress') {
-    refreshIpConfiguration({ reloadOnChange: true })
+    runIpCheckCycle({ reloadOnChange: true })
   }
 
+  ensureIpPollingAlarm()
+  getStoredSettings().then(scheduleNextIpCheck)
   scheduleApplySettingsToAllTabs()
 })
 
