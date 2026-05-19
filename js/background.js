@@ -23,7 +23,6 @@ const APPLY_DEBOUNCE_MS = 150
 let applyAllTabsTimer = null
 let ipCheckTimer = null
 let ipRefreshPromise = null
-let lastIpChangeReloadAt = 0
 
 const isConfigurableUrl = (url = '') =>
   !url ||
@@ -82,33 +81,13 @@ const saveIpConfiguration = async (ipProfile) => {
   }
 }
 
-const reloadConfigurableTabs = async () => {
-  if (Date.now() - lastIpChangeReloadAt < 3000) return
-  lastIpChangeReloadAt = Date.now()
-
-  const tabs = await chrome.tabs.query({})
-  await Promise.all(
-    tabs
-      .filter((tab) => tab.id && isConfigurableUrl(tab.url))
-      .map(
-        (tab) =>
-          new Promise((resolve) => {
-            chrome.tabs.reload(tab.id, {}, () => resolve())
-          })
-      )
-  )
-}
-
-const refreshIpConfiguration = async ({ reloadOnChange = false } = {}) => {
+const refreshIpConfiguration = async () => {
   if (!ipRefreshPromise) {
     ipRefreshPromise = fetchIpProfile()
       .then(saveIpConfiguration)
-      .then(async (result) => {
+      .then((result) => {
         if (result?.changed) {
           scheduleApplySettingsToAllTabs()
-          if (reloadOnChange) {
-            await reloadConfigurableTabs()
-          }
         }
 
         return result?.settings || null
@@ -132,18 +111,18 @@ const scheduleNextIpCheck = (settings = {}) => {
 
   const intervalSeconds = getIpCheckIntervalSeconds(settings)
   ipCheckTimer = setTimeout(() => {
-    runIpCheckCycle({ reloadOnChange: true })
+    runIpCheckCycle()
   }, intervalSeconds * 1000)
 }
 
-const runIpCheckCycle = async ({ reloadOnChange = true } = {}) => {
+const runIpCheckCycle = async () => {
   const settings = await getStoredSettings()
   if (settings.configuration !== 'ipAddress') {
     scheduleNextIpCheck(settings)
     return null
   }
 
-  const result = await refreshIpConfiguration({ reloadOnChange })
+  const result = await refreshIpConfiguration()
   scheduleNextIpCheck(await getStoredSettings())
   return result
 }
@@ -162,12 +141,12 @@ const getEffectiveSettings = async () => {
   if (!hasStoredIpConfiguration) {
     return {
       ...settings,
-      ...(await refreshIpConfiguration({ reloadOnChange: false })),
+      ...(await refreshIpConfiguration()),
     }
   }
 
   if (isStale) {
-    refreshIpConfiguration({ reloadOnChange: true })
+    refreshIpConfiguration()
   }
 
   return settings
@@ -210,7 +189,7 @@ const scheduleApplySettingsToAllTabs = () => {
 const handleStartup = async () => {
   const settings = await getStoredSettings()
   if (settings.configuration === 'ipAddress') {
-    runIpCheckCycle({ reloadOnChange: true })
+    runIpCheckCycle()
   }
   scheduleNextIpCheck(settings)
   scheduleApplySettingsToAllTabs()
@@ -245,7 +224,7 @@ chrome.runtime.onStartup.addListener(handleStartup)
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== IP_POLL_ALARM_NAME) return
 
-  runIpCheckCycle({ reloadOnChange: true })
+  runIpCheckCycle()
 })
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -291,7 +270,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 
   if (changes.configuration?.newValue === 'ipAddress') {
-    runIpCheckCycle({ reloadOnChange: true })
+    runIpCheckCycle()
   }
 
   ensureIpPollingAlarm()

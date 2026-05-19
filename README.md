@@ -3,14 +3,14 @@
 Cloaq 是 keeanzhong 维护的浏览器扩展，用来伪装网页能读取到的时区、地理位置、区域格式和语言信息。本版本在 GPL-3.0 开源基础上增加了更可靠的 IP 自动匹配、中文界面切换，以及语言注入能力。
 
 - 项目主页：`https://github.com/keeanzhong/cloaq`
-- 当前版本：`1.3.4`
+- 当前版本：`1.3.5`
 
 ## 主要功能
 
 - 自动匹配当前 IP：优先使用 `ipapi.co`，失败时回退到 `ip-api.com`。
 - 自动填充时区、经纬度、区域格式和语言列表。
 - 支持手动填写 `Time Zone`、`Locale`、`Languages`、纬度和经度。
-- 支持调整 IP 检查间隔，默认 5 秒；后台 alarm 兜底仍受 Chrome 最快 30 秒限制。
+- 支持调整 IP 检查间隔，默认 5 秒；后台发现出口 IP 变化后会同步时区、语言和经纬度覆盖，但不会自动刷新正在使用的网页。
 - 支持 English / 简体中文界面切换。
 - 通过 Chrome Debugger API 注入：
   - `Intl.DateTimeFormat().resolvedOptions().timeZone`
@@ -112,7 +112,7 @@ navigator.languages
 - `debugger`：用于通过 Chrome Debugger API 修改时区、地理位置、区域格式、语言和请求头。
 - `webNavigation`：用于在页面导航时重新附加调试配置。
 - `tabs`：用于在标签页创建、切换、刷新和跳转时尽早应用配置，减少页面先读取真实本机环境的窗口。
-- `alarms`：用于后台定时检查出口 IP 是否变化，并在变化后自动更新配置和重载网页。
+- `alarms`：用于后台定时检查出口 IP 是否变化，并在变化后自动更新配置和重新应用浏览器覆盖；不会自动刷新网页。
 - `storage`：用于保存配置、界面语言和手动填写的参数。
 
 ## 许可证
