@@ -103,16 +103,6 @@ navigator.languages
 
 如需检查请求头，可以打开开发者工具的 Network 面板，查看请求中的 `Accept-Language`。
 
-## 仓库私密化
-
-这个 fork 可以改成 private 私密仓库。使用 GitHub CLI：
-
-```bash
-gh repo edit keeanzhong/cloaq --visibility private --accept-visibility-change-consequences
-```
-
-私密仓库不会影响你本地加载扩展，但会影响别人访问仓库、fork 网络和公开展示。
-
 ## 权限说明
 
 - `debugger`：用于通过 Chrome Debugger API 修改时区、地理位置、区域格式、语言和请求头。
