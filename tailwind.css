@@ -22,6 +22,30 @@ p {
   @apply text-lightGrey hover:text-offBlack;
 }
 
+.action-button {
+  @apply h-[38px] shrink-0 rounded bg-offBlack px-3 text-white hover:bg-lightGrey;
+}
+
+.secondary-button {
+  @apply mt-2 h-[38px] w-full rounded border border-borderDark hover:bg-borderLight;
+}
+
+.error-text {
+  @apply mt-2 text-xs text-red-600;
+}
+
+.excluded-site-row {
+  @apply flex items-center justify-between gap-2 rounded border border-borderLight px-3 py-2;
+}
+
+.excluded-site-host {
+  @apply min-w-0 break-all;
+}
+
+.excluded-site-remove {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded text-lightGrey hover:bg-borderLight hover:text-offBlack;
+}
+
 .info-block {
   @apply flex flex-col gap-3 border border-borderDark rounded p-6;
 }

@@ -1,6 +1,17 @@
 const messages = {
   en: {
     uiLanguage: 'UI Language',
+    autoUiLanguage: 'Follow Time Zone',
+    extensionEnabled: 'Enable Cloaq',
+    extensionEnabledDescription:
+      "Off uses your browser's local environment without Cloaq overrides.",
+    excludedSites: 'Excluded Sites',
+    excludedSitePlaceholder: 'example.com',
+    addSite: 'Add',
+    excludeCurrentSite: 'Exclude Current Site',
+    invalidExcludedSite: 'Enter a valid HTTP or HTTPS website.',
+    noExcludedSites: 'No excluded sites.',
+    removeExcludedSite: 'Remove excluded site',
     configuration: 'Configuration',
     browserDefault: 'Browser Default',
     custom: 'Custom',
@@ -37,6 +48,17 @@ const messages = {
   },
   'zh-CN': {
     uiLanguage: '界面语言',
+    autoUiLanguage: '跟随当前时区',
+    extensionEnabled: '启用 Cloaq',
+    extensionEnabledDescription:
+      '关闭后撤销 Cloaq 覆盖，网页跟随浏览器本地环境。',
+    excludedSites: '排除网站',
+    excludedSitePlaceholder: 'example.com',
+    addSite: '添加',
+    excludeCurrentSite: '排除当前网站',
+    invalidExcludedSite: '请输入有效的 HTTP 或 HTTPS 网站。',
+    noExcludedSites: '暂无排除的网站。',
+    removeExcludedSite: '移除排除网站',
     configuration: '配置',
     browserDefault: '浏览器默认',
     custom: '自定义',
@@ -73,17 +95,48 @@ const messages = {
 }
 
 const defaultUiLanguage = 'en'
+const autoUiLanguage = 'auto'
+const chineseTimeZones = new Set([
+  'Asia/Shanghai',
+  'Asia/Chongqing',
+  'Asia/Harbin',
+  'Asia/Urumqi',
+  'Asia/Hong_Kong',
+  'Asia/Macau',
+  'Asia/Taipei',
+])
 
 const getSupportedUiLanguage = (language) =>
   Object.prototype.hasOwnProperty.call(messages, language)
     ? language
     : defaultUiLanguage
 
-const detectUiLanguage = () => {
-  const chromeLanguage = chrome.i18n?.getUILanguage?.()
-  if (chromeLanguage?.toLowerCase().startsWith('zh')) return 'zh-CN'
-  return defaultUiLanguage
+const getUiLanguageMode = (language) =>
+  language === autoUiLanguage ||
+  Object.prototype.hasOwnProperty.call(messages, language)
+    ? language
+    : autoUiLanguage
+
+const detectUiLanguageFromTimeZone = (timeZone) => {
+  let effectiveTimeZone = timeZone
+
+  if (!effectiveTimeZone) {
+    try {
+      effectiveTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    } catch (error) {
+      effectiveTimeZone = ''
+    }
+  }
+
+  return chineseTimeZones.has(effectiveTimeZone)
+    ? 'zh-CN'
+    : defaultUiLanguage
 }
+
+const resolveUiLanguage = (mode, timeZone) =>
+  mode === autoUiLanguage
+    ? detectUiLanguageFromTimeZone(timeZone)
+    : getSupportedUiLanguage(mode)
 
 const translate = (language, key) =>
   messages[getSupportedUiLanguage(language)][key] || messages.en[key] || key
@@ -121,7 +174,11 @@ const applyPopupTranslations = applyTranslations
 export {
   applyTranslations,
   applyPopupTranslations,
+  autoUiLanguage,
   defaultUiLanguage,
-  detectUiLanguage,
+  detectUiLanguageFromTimeZone,
+  getUiLanguageMode,
   getSupportedUiLanguage,
+  resolveUiLanguage,
+  translate,
 }
