@@ -1,8 +1,11 @@
 import { attachDebugger, detachDebugger, detachDebuggerForTab } from './debugger.js'
 import { buildIpConfiguration, hasSpoofingConfiguration } from './configurationUtils.js'
 import { fetchIpProfile } from './ipLookup.js'
+import { isUrlExcluded } from './siteExclusions.js'
 
 const SETTINGS_KEYS = [
+  'extensionEnabled',
+  'excludedSites',
   'configuration',
   'timezone',
   'locale',
@@ -31,6 +34,9 @@ const isConfigurableUrl = (url = '') =>
   url.startsWith('file://')
 
 const getStoredSettings = () => chrome.storage.local.get(SETTINGS_KEYS)
+
+const isExtensionEnabled = (settings = {}) =>
+  settings.extensionEnabled !== false
 
 const getIpCheckIntervalSeconds = (settings = {}) => {
   const value = Number(settings.ipCheckIntervalSeconds)
@@ -107,7 +113,9 @@ const refreshIpConfiguration = async () => {
 const scheduleNextIpCheck = (settings = {}) => {
   clearTimeout(ipCheckTimer)
 
-  if (settings.configuration !== 'ipAddress') return
+  if (!isExtensionEnabled(settings) || settings.configuration !== 'ipAddress') {
+    return
+  }
 
   const intervalSeconds = getIpCheckIntervalSeconds(settings)
   ipCheckTimer = setTimeout(() => {
@@ -117,7 +125,7 @@ const scheduleNextIpCheck = (settings = {}) => {
 
 const runIpCheckCycle = async () => {
   const settings = await getStoredSettings()
-  if (settings.configuration !== 'ipAddress') {
+  if (!isExtensionEnabled(settings) || settings.configuration !== 'ipAddress') {
     scheduleNextIpCheck(settings)
     return null
   }
@@ -129,6 +137,8 @@ const runIpCheckCycle = async () => {
 
 const getEffectiveSettings = async () => {
   const settings = await getStoredSettings()
+
+  if (!isExtensionEnabled(settings)) return settings
 
   if (settings.configuration !== 'ipAddress') return settings
 
@@ -152,12 +162,27 @@ const getEffectiveSettings = async () => {
   return settings
 }
 
-const applySettingsToTab = async (tabId) => {
+const getTabUrl = async (tabId) => {
+  try {
+    const tab = await chrome.tabs.get(tabId)
+    return tab.url || ''
+  } catch (error) {
+    return ''
+  }
+}
+
+const applySettingsToTab = async (tabId, url = '') => {
   if (!tabId) return
 
   const settings = await getEffectiveSettings()
+  const targetUrl = url || (await getTabUrl(tabId))
+  if (!isConfigurableUrl(targetUrl)) return
 
-  if (!hasSpoofingConfiguration(settings)) {
+  if (
+    !isExtensionEnabled(settings) ||
+    isUrlExcluded(targetUrl, settings.excludedSites) ||
+    !hasSpoofingConfiguration(settings)
+  ) {
     detachDebuggerForTab(tabId)
     return
   }
@@ -177,7 +202,7 @@ const applySettingsToAllTabs = async () => {
   await Promise.all(
     tabs
       .filter((tab) => tab.id && isConfigurableUrl(tab.url))
-      .map((tab) => applySettingsToTab(tab.id))
+      .map((tab) => applySettingsToTab(tab.id, tab.url))
   )
 }
 
@@ -188,7 +213,7 @@ const scheduleApplySettingsToAllTabs = () => {
 
 const handleStartup = async () => {
   const settings = await getStoredSettings()
-  if (settings.configuration === 'ipAddress') {
+  if (isExtensionEnabled(settings) && settings.configuration === 'ipAddress') {
     runIpCheckCycle()
   }
   scheduleNextIpCheck(settings)
@@ -197,6 +222,11 @@ const handleStartup = async () => {
 
 const ensureIpPollingAlarm = async () => {
   const settings = await getStoredSettings()
+  if (!isExtensionEnabled(settings) || settings.configuration !== 'ipAddress') {
+    await chrome.alarms.clear(IP_POLL_ALARM_NAME)
+    return
+  }
+
   const intervalMinutes = Math.max(
     getIpCheckIntervalSeconds(settings) / 60,
     0.5
@@ -229,7 +259,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 chrome.tabs.onCreated.addListener((tab) => {
   if (tab.id && isConfigurableUrl(tab.url)) {
-    applySettingsToTab(tab.id)
+    applySettingsToTab(tab.id, tab.url)
   }
 })
 
@@ -242,39 +272,49 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     (changeInfo.status === 'loading' || changeInfo.url) &&
     isConfigurableUrl(tab.url || changeInfo.url)
   ) {
-    applySettingsToTab(tabId)
+    applySettingsToTab(tabId, tab.url || changeInfo.url)
   }
 })
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId === 0) {
-    applySettingsToTab(details.tabId)
+    applySettingsToTab(details.tabId, details.url)
   }
 })
 
 chrome.webNavigation.onCommitted.addListener((details) => {
   if (details.frameId === 0) {
-    applySettingsToTab(details.tabId)
+    applySettingsToTab(details.tabId, details.url)
   }
 })
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
+chrome.storage.onChanged.addListener(async (changes, areaName) => {
   if (areaName !== 'local') return
 
   const relevantChange = SETTINGS_KEYS.some((key) => changes[key])
   if (!relevantChange) return
 
-  if (changes.configuration?.newValue === 'browserDefault') {
+  const settings = await getStoredSettings()
+
+  if (
+    !isExtensionEnabled(settings) ||
+    settings.configuration === 'browserDefault'
+  ) {
+    clearTimeout(ipCheckTimer)
+    await chrome.alarms.clear(IP_POLL_ALARM_NAME)
     detachDebugger()
     return
   }
 
-  if (changes.configuration?.newValue === 'ipAddress') {
+  if (
+    changes.configuration?.newValue === 'ipAddress' ||
+    changes.extensionEnabled?.newValue === true
+  ) {
     runIpCheckCycle()
   }
 
-  ensureIpPollingAlarm()
-  getStoredSettings().then(scheduleNextIpCheck)
+  await ensureIpPollingAlarm()
+  scheduleNextIpCheck(settings)
   scheduleApplySettingsToAllTabs()
 })
 

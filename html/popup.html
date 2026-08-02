@@ -26,9 +26,41 @@
       <h2 class="section-title" data-i18n="uiLanguage">UI Language</h2>
       <select name="uiLanguage"
         class="appearance-none cursor-pointer w-full py-2 px-3 border border-borderDark bg-transparent rounded h-[38px] focus:outline-none focus:border-purple bg-[url('/img/arrow.svg')] bg-no-repeat bg-[right_0.75rem_center] bg-[length:1rem]">
+        <option value="auto" data-i18n="autoUiLanguage">Follow Time Zone</option>
         <option value="en">English</option>
         <option value="zh-CN">简体中文</option>
       </select>
+    </div>
+
+    <label class="flex cursor-pointer items-center justify-between gap-4" for="extensionEnabled">
+      <span class="min-w-0">
+        <span class="block font-medium" data-i18n="extensionEnabled">Enable Cloaq</span>
+        <span class="mt-1 block text-xs text-lightGrey" data-i18n="extensionEnabledDescription">
+          Off uses your browser's local environment without Cloaq overrides.
+        </span>
+      </span>
+      <span class="relative inline-flex h-6 w-11 shrink-0 items-center">
+        <input type="checkbox" id="extensionEnabled" name="extensionEnabled" class="peer sr-only">
+        <span class="absolute inset-0 rounded-full bg-borderDark transition-colors peer-checked:bg-offBlack"></span>
+        <span
+          class="absolute left-1 h-4 w-4 rounded-full bg-white transition-transform peer-checked:translate-x-5"></span>
+      </span>
+    </label>
+
+    <div>
+      <h2 class="section-title" data-i18n="excludedSites">Excluded Sites</h2>
+      <div class="flex gap-2">
+        <input type="text" id="excludedSiteInput" class="input" placeholder="example.com"
+          data-i18n-placeholder="excludedSitePlaceholder">
+        <button type="button" id="addExcludedSiteButton" class="action-button" data-i18n="addSite">Add</button>
+      </div>
+      <button type="button" id="excludeCurrentSiteButton" class="secondary-button"
+        data-i18n="excludeCurrentSite">Exclude Current Site</button>
+      <p id="excludedSiteError" class="error-text" data-i18n="invalidExcludedSite" hidden>
+        Enter a valid HTTP or HTTPS website.
+      </p>
+      <p id="noExcludedSites" class="mt-2 text-xs" data-i18n="noExcludedSites">No excluded sites.</p>
+      <div id="excludedSitesList" class="mt-2 flex max-h-32 flex-col gap-2 overflow-y-auto"></div>
     </div>
 
     <div>

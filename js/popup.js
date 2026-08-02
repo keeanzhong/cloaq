@@ -1,11 +1,16 @@
 import locationsConfigurations from './locationsConfigurations.js'
 import {
   applyPopupTranslations,
-  detectUiLanguage,
-  getSupportedUiLanguage,
+  getUiLanguageMode,
+  resolveUiLanguage,
+  translate,
 } from './i18n.js'
 import { buildIpConfiguration, buildLanguagesForLocale } from './configurationUtils.js'
 import { fetchIpProfile } from './ipLookup.js'
+import {
+  normalizeExcludedSites,
+  normalizeSiteHost,
+} from './siteExclusions.js'
 
 const extensionVersion = chrome.runtime.getManifest().version
 document.getElementById('extensionVersion').textContent = `v${extensionVersion}`
@@ -13,6 +18,19 @@ document.getElementById('extensionVersion').textContent = `v${extensionVersion}`
 const reloadButton = document.getElementById('reloadButton')
 const infoButton = document.getElementById('infoButton')
 const uiLanguageSelect = document.querySelector('select[name="uiLanguage"]')
+const extensionEnabledInput = document.querySelector(
+  'input[name="extensionEnabled"]'
+)
+const excludedSiteInput = document.getElementById('excludedSiteInput')
+const addExcludedSiteButton = document.getElementById(
+  'addExcludedSiteButton'
+)
+const excludeCurrentSiteButton = document.getElementById(
+  'excludeCurrentSiteButton'
+)
+const excludedSiteError = document.getElementById('excludedSiteError')
+const noExcludedSites = document.getElementById('noExcludedSites')
+const excludedSitesList = document.getElementById('excludedSitesList')
 const configurationSelect = document.querySelector(
   'select[name="configuration"]'
 )
@@ -30,6 +48,7 @@ const longitudeInput = document.querySelector('input[name="longitude"]')
 // )
 
 let ipProfile = null
+let excludedSites = []
 
 // Add location options to the select menu
 Object.entries(locationsConfigurations).forEach(([key, location]) => {
@@ -42,6 +61,83 @@ Object.entries(locationsConfigurations).forEach(([key, location]) => {
 const refreshIpProfile = async () => {
   ipProfile = await fetchIpProfile()
   return ipProfile
+}
+
+const getCurrentUiLanguage = () => {
+  const useConfiguredTimeZone =
+    extensionEnabledInput.checked &&
+    configurationSelect.value !== 'browserDefault'
+  return resolveUiLanguage(
+    uiLanguageSelect.value,
+    useConfiguredTimeZone ? timeZoneInput.value : ''
+  )
+}
+
+const applyCurrentUiLanguage = () => {
+  const uiLanguage = getCurrentUiLanguage()
+  applyPopupTranslations(uiLanguage)
+  renderExcludedSites()
+}
+
+const setExcludedSiteError = (visible) => {
+  excludedSiteError.hidden = !visible
+}
+
+const renderExcludedSites = () => {
+  excludedSitesList.replaceChildren()
+  noExcludedSites.hidden = excludedSites.length > 0
+
+  const removeLabel = translate(
+    getCurrentUiLanguage(),
+    'removeExcludedSite'
+  )
+
+  excludedSites.forEach((site) => {
+    const row = document.createElement('div')
+    row.className = 'excluded-site-row'
+
+    const host = document.createElement('span')
+    host.className = 'excluded-site-host'
+    host.textContent = site
+
+    const removeButton = document.createElement('button')
+    removeButton.type = 'button'
+    removeButton.className = 'excluded-site-remove'
+    removeButton.textContent = '×'
+    removeButton.title = `${removeLabel}: ${site}`
+    removeButton.setAttribute('aria-label', `${removeLabel}: ${site}`)
+    removeButton.addEventListener('click', () => removeExcludedSite(site))
+
+    row.append(host, removeButton)
+    excludedSitesList.append(row)
+  })
+}
+
+const saveExcludedSites = async (sites) => {
+  excludedSites = normalizeExcludedSites(sites)
+  renderExcludedSites()
+  await chrome.storage.local.set({ excludedSites })
+}
+
+const addExcludedSite = async (value) => {
+  const site = normalizeSiteHost(value)
+  if (!site) {
+    setExcludedSiteError(true)
+    return
+  }
+
+  setExcludedSiteError(false)
+  excludedSiteInput.value = ''
+  await saveExcludedSites([...excludedSites, site])
+}
+
+const removeExcludedSite = async (site) => {
+  await saveExcludedSites(excludedSites.filter((item) => item !== site))
+}
+
+const excludeCurrentSite = async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  await addExcludedSite(tab?.url || '')
 }
 
 const applyIpConfiguration = async () => {
@@ -85,6 +181,7 @@ const handleConfigurationChange = async () => {
     }
   }
 
+  applyCurrentUiLanguage()
   await saveToStorage()
 }
 
@@ -115,6 +212,7 @@ const saveToStorage = async () => {
     timezone: timeZoneInput.value || null,
     locale: localeInput.value || null,
     languages: languagesInput.value || null,
+    extensionEnabled: extensionEnabledInput.checked,
     ipCheckIntervalSeconds: normalizeIpCheckInterval(
       ipCheckIntervalInput.value
     ),
@@ -129,16 +227,23 @@ const saveToStorage = async () => {
 }
 
 const saveUiLanguage = async () => {
-  const uiLanguage = getSupportedUiLanguage(uiLanguageSelect.value)
-  uiLanguageSelect.value = uiLanguage
-  applyPopupTranslations(uiLanguage)
-  await chrome.storage.local.set({ uiLanguage })
+  const uiLanguageMode = getUiLanguageMode(uiLanguageSelect.value)
+  uiLanguageSelect.value = uiLanguageMode
+  applyCurrentUiLanguage()
+  await chrome.storage.local.set({ uiLanguage: uiLanguageMode })
+}
+
+const saveExtensionEnabled = async () => {
+  applyCurrentUiLanguage()
+  await saveToStorage()
 }
 
 const loadFromStorage = async () => {
   try {
     const storage = await chrome.storage.local.get([
       'configuration',
+      'extensionEnabled',
+      'excludedSites',
       'timezone',
       'locale',
       'languages',
@@ -149,12 +254,9 @@ const loadFromStorage = async () => {
       // 'useDebuggerApi',
     ])
 
-    uiLanguageSelect.value = getSupportedUiLanguage(
-      storage.uiLanguage || detectUiLanguage()
-    )
-    applyPopupTranslations(uiLanguageSelect.value)
-
     configurationSelect.value = storage.configuration || 'browserDefault'
+    extensionEnabledInput.checked = storage.extensionEnabled !== false
+    excludedSites = normalizeExcludedSites(storage.excludedSites)
     ipCheckIntervalInput.value = normalizeIpCheckInterval(
       storage.ipCheckIntervalSeconds
     )
@@ -165,6 +267,8 @@ const loadFromStorage = async () => {
       storage.lat,
       storage.lon
     )
+    uiLanguageSelect.value = getUiLanguageMode(storage.uiLanguage)
+    applyCurrentUiLanguage()
     // debuggerApiModeCheckbox.checked = storage.useDebuggerApi || false
   } catch (error) {
     console.error('Error loading from storage:', error)
@@ -184,6 +288,7 @@ const debouncedSaveToStorage = debounce(saveToStorage, 300)
 
 const handleInputChange = () => {
   configurationSelect.value = 'custom'
+  applyCurrentUiLanguage()
   debouncedSaveToStorage()
 }
 
@@ -192,6 +297,17 @@ infoButton.addEventListener('click', () =>
   chrome.tabs.create({ url: 'html/info.html' })
 )
 uiLanguageSelect.addEventListener('change', saveUiLanguage)
+extensionEnabledInput.addEventListener('change', saveExtensionEnabled)
+addExcludedSiteButton.addEventListener('click', () =>
+  addExcludedSite(excludedSiteInput.value)
+)
+excludeCurrentSiteButton.addEventListener('click', excludeCurrentSite)
+excludedSiteInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    addExcludedSite(excludedSiteInput.value)
+  }
+})
 configurationSelect.addEventListener('change', handleConfigurationChange)
 timeZoneInput.addEventListener('input', handleInputChange)
 localeInput.addEventListener('input', handleInputChange)
@@ -201,10 +317,37 @@ latitudeInput.addEventListener('input', handleInputChange)
 longitudeInput.addEventListener('input', handleInputChange)
 // debuggerApiModeCheckbox.addEventListener('change', saveToStorage)
 
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') return
+
+  if (changes.extensionEnabled) {
+    extensionEnabledInput.checked = changes.extensionEnabled.newValue !== false
+  }
+
+  if (changes.uiLanguage) {
+    uiLanguageSelect.value = getUiLanguageMode(changes.uiLanguage.newValue)
+  }
+
+  if (changes.excludedSites) {
+    excludedSites = normalizeExcludedSites(changes.excludedSites.newValue)
+    renderExcludedSites()
+  }
+
+  if (changes.timezone && configurationSelect.value === 'ipAddress') {
+    timeZoneInput.value = changes.timezone.newValue || ''
+  }
+
+  if (changes.extensionEnabled || changes.uiLanguage || changes.timezone) {
+    applyCurrentUiLanguage()
+  }
+})
+
 await loadFromStorage()
 
-if (configurationSelect.value === 'ipAddress') {
-  await handleConfigurationChange()
-} else {
-  refreshIpProfile().catch((error) => console.error(error.message))
+if (extensionEnabledInput.checked) {
+  if (configurationSelect.value === 'ipAddress') {
+    await handleConfigurationChange()
+  } else {
+    refreshIpProfile().catch((error) => console.error(error.message))
+  }
 }
