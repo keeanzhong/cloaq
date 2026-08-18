@@ -3,7 +3,7 @@
 Cloaq 是 keeanzhong 维护的浏览器扩展，用来伪装网页能读取到的时区、地理位置、区域格式和语言信息。本版本在 GPL-3.0 开源基础上增加了更可靠的 IP 自动匹配、中文界面切换，以及语言注入能力。
 
 - 项目主页：`https://github.com/keeanzhong/cloaq`
-- 当前版本：`1.3.6`
+- 当前版本：`1.3.7`
 
 ## 主要功能
 
@@ -20,6 +20,7 @@ Cloaq 是 keeanzhong 维护的浏览器扩展，用来伪装网页能读取到�
   - `navigator.languages`
   - HTTP `Accept-Language`
   - Geolocation 经纬度
+- 标签页关闭、切换或进入 `chrome://` 等受限页面时，会串行清理 debugger 状态并忽略预期的生命周期错误，避免扩展错误页持续累积无效报错。
 
 ## 重要限制
 
@@ -108,6 +109,12 @@ navigator.languages
 ```
 
 如需检查请求头，可以打开开发者工具的 Network 面板，查看请求中的 `Accept-Language`。
+
+运行自动化回归测试：
+
+```bash
+npm test
+```
 
 ## 权限说明
 

@@ -2,6 +2,7 @@ import { attachDebugger, detachDebugger, detachDebuggerForTab } from './debugger
 import { buildIpConfiguration, hasSpoofingConfiguration } from './configurationUtils.js'
 import { fetchIpProfile } from './ipLookup.js'
 import { isUrlExcluded } from './siteExclusions.js'
+import { getUpdatedTabUrl, isConfigurableUrl } from './tabUtils.js'
 
 const SETTINGS_KEYS = [
   'extensionEnabled',
@@ -26,12 +27,6 @@ const APPLY_DEBOUNCE_MS = 150
 let applyAllTabsTimer = null
 let ipCheckTimer = null
 let ipRefreshPromise = null
-
-const isConfigurableUrl = (url = '') =>
-  !url ||
-  url.startsWith('http://') ||
-  url.startsWith('https://') ||
-  url.startsWith('file://')
 
 const getStoredSettings = () => chrome.storage.local.get(SETTINGS_KEYS)
 
@@ -176,18 +171,20 @@ const applySettingsToTab = async (tabId, url = '') => {
 
   const settings = await getEffectiveSettings()
   const targetUrl = url || (await getTabUrl(tabId))
-  if (!isConfigurableUrl(targetUrl)) return
+  if (!isConfigurableUrl(targetUrl)) {
+    await detachDebuggerForTab(tabId)
+    return
+  }
 
   if (
     !isExtensionEnabled(settings) ||
     isUrlExcluded(targetUrl, settings.excludedSites) ||
     !hasSpoofingConfiguration(settings)
   ) {
-    detachDebuggerForTab(tabId)
-    return
+    return detachDebuggerForTab(tabId)
   }
 
-  attachDebugger(
+  return attachDebugger(
     tabId,
     settings.timezone,
     settings.locale,
@@ -268,11 +265,8 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 })
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (
-    (changeInfo.status === 'loading' || changeInfo.url) &&
-    isConfigurableUrl(tab.url || changeInfo.url)
-  ) {
-    applySettingsToTab(tabId, tab.url || changeInfo.url)
+  if (changeInfo.status === 'loading' || changeInfo.url) {
+    applySettingsToTab(tabId, getUpdatedTabUrl(changeInfo, tab))
   }
 })
 

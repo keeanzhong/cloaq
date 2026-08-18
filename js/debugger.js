@@ -3,21 +3,100 @@ import {
   parseLanguageList,
 } from './languageUtils.js'
 
+const DEBUGGER_PROTOCOL_VERSION = '1.3'
+const tabOperationQueues = new Map()
+
+const EXPECTED_LIFECYCLE_ERRORS = [
+  /cannot access a (chrome|edge)(-extension)?:\/\/ url/i,
+  /cannot access contents of url/i,
+  /cannot attach to this target/i,
+  /debugger is not attached/i,
+  /no tab with given id/i,
+  /no target with given id/i,
+  /target closed/i,
+]
+
 const toFiniteNumber = (value) => {
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
 
-const sendCommand = (tabId, command, params = {}, callback = null) => {
-  chrome.debugger.sendCommand({ tabId }, command, params, (result) => {
-    if (chrome.runtime.lastError) {
-      console.warn(`${command} failed: ${chrome.runtime.lastError.message}`)
-      callback?.(false, null)
-      return
-    }
+const isExpectedLifecycleError = (message = '') =>
+  EXPECTED_LIFECYCLE_ERRORS.some((pattern) => pattern.test(message))
 
-    callback?.(true, result)
+const reportDebuggerError = (label, message) => {
+  if (message && !isExpectedLifecycleError(message)) {
+    console.warn(`${label} failed: ${message}`)
+  }
+}
+
+const invokeDebuggerApi = (label, invoke) =>
+  new Promise((resolve) => {
+    try {
+      invoke((result) => {
+        const runtimeError = chrome.runtime.lastError
+        const message = runtimeError?.message || ''
+
+        if (message) {
+          reportDebuggerError(label, message)
+          resolve({ error: message, ok: false, result: null })
+          return
+        }
+
+        resolve({ error: '', ok: true, result })
+      })
+    } catch (error) {
+      const message = error?.message || String(error)
+      reportDebuggerError(label, message)
+      resolve({ error: message, ok: false, result: null })
+    }
   })
+
+const sendCommand = (tabId, command, params = {}) =>
+  invokeDebuggerApi(command, (callback) =>
+    chrome.debugger.sendCommand({ tabId }, command, params, callback)
+  )
+
+const getDebuggerTargets = async () => {
+  const response = await invokeDebuggerApi('Debugger target lookup', (callback) =>
+    chrome.debugger.getTargets(callback)
+  )
+
+  return response.ok && Array.isArray(response.result) ? response.result : []
+}
+
+const attachDebuggerTarget = (tabId) =>
+  invokeDebuggerApi('Debugger attach', (callback) =>
+    chrome.debugger.attach(
+      { tabId },
+      DEBUGGER_PROTOCOL_VERSION,
+      callback
+    )
+  )
+
+const detachDebuggerTarget = (tabId) =>
+  invokeDebuggerApi('Debugger detach', (callback) =>
+    chrome.debugger.detach({ tabId }, callback)
+  )
+
+const queueTabOperation = (tabId, operation) => {
+  const previous = tabOperationQueues.get(tabId) || Promise.resolve()
+  const current = previous
+    .catch(() => false)
+    .then(operation)
+    .catch((error) => {
+      reportDebuggerError('Debugger operation', error?.message || String(error))
+      return false
+    })
+
+  tabOperationQueues.set(tabId, current)
+  void current.finally(() => {
+    if (tabOperationQueues.get(tabId) === current) {
+      tabOperationQueues.delete(tabId)
+    }
+  })
+
+  return current
 }
 
 const buildNavigatorLanguageScript = (languages) => `
@@ -57,101 +136,159 @@ const hasDebuggerConfiguration = (timezone, locale, lat, lon, languages) => {
   )
 }
 
-const applyLanguageOverrides = (tabId, languages) => {
+const applyLanguageOverrides = async (tabId, languages) => {
   const languageList = parseLanguageList(languages)
-  if (!languageList.length) return
+  if (!languageList.length) return true
 
-  sendCommand(tabId, 'Network.enable', {}, (enabled) => {
-    if (!enabled) return
+  const networkEnabled = await sendCommand(tabId, 'Network.enable')
+  if (
+    !networkEnabled.ok &&
+    isExpectedLifecycleError(networkEnabled.error)
+  ) {
+    return false
+  }
 
-    sendCommand(tabId, 'Network.setExtraHTTPHeaders', {
-      headers: {
-        'Accept-Language': buildAcceptLanguageHeader(languageList),
-      },
-    })
-  })
+  if (networkEnabled.ok) {
+    const headersApplied = await sendCommand(
+      tabId,
+      'Network.setExtraHTTPHeaders',
+      {
+        headers: {
+          'Accept-Language': buildAcceptLanguageHeader(languageList),
+        },
+      }
+    )
+
+    if (
+      !headersApplied.ok &&
+      isExpectedLifecycleError(headersApplied.error)
+    ) {
+      return false
+    }
+  }
 
   const languageScript = buildNavigatorLanguageScript(languageList)
-  sendCommand(
+  const scriptAdded = await sendCommand(
     tabId,
     'Page.addScriptToEvaluateOnNewDocument',
     {
       source: languageScript,
       runImmediately: true,
-    },
-    (added) => {
-      if (!added) {
-        sendCommand(tabId, 'Page.addScriptToEvaluateOnNewDocument', {
-          source: languageScript,
-        })
-      }
     }
   )
+
+  if (scriptAdded.ok) return true
+  if (isExpectedLifecycleError(scriptAdded.error)) return false
+
+  const fallback = await sendCommand(
+    tabId,
+    'Page.addScriptToEvaluateOnNewDocument',
+    { source: languageScript }
+  )
+
+  return fallback.ok
 }
 
-const applyDebuggerOverrides = (tabId, timezone, locale, lat, lon, languages) => {
+const applyDebuggerOverrides = async (
+  tabId,
+  timezone,
+  locale,
+  lat,
+  lon,
+  languages
+) => {
   const latitude = toFiniteNumber(lat)
   const longitude = toFiniteNumber(lon)
   const hasCoordinates = latitude !== null && longitude !== null
+  const commands = []
 
   if (timezone) {
-    sendCommand(tabId, 'Emulation.setTimezoneOverride', {
-      timezoneId: timezone,
-    })
+    commands.push([
+      'Emulation.setTimezoneOverride',
+      { timezoneId: timezone },
+    ])
   }
 
   if (hasCoordinates) {
-    sendCommand(tabId, 'Emulation.setGeolocationOverride', {
-      latitude,
-      longitude,
-      accuracy: 1,
-    })
+    commands.push([
+      'Emulation.setGeolocationOverride',
+      { latitude, longitude, accuracy: 1 },
+    ])
   }
 
   if (locale) {
-    sendCommand(tabId, 'Emulation.setLocaleOverride', {
-      locale,
-    })
+    commands.push(['Emulation.setLocaleOverride', { locale }])
   }
 
-  applyLanguageOverrides(tabId, languages)
+  for (const [command, params] of commands) {
+    const response = await sendCommand(tabId, command, params)
+    if (!response.ok && isExpectedLifecycleError(response.error)) {
+      return false
+    }
+  }
+
+  return applyLanguageOverrides(tabId, languages)
 }
 
-const attachDebugger = (tabId, timezone, locale, lat, lon, languages) => {
-  if (!hasDebuggerConfiguration(timezone, locale, lat, lon, languages)) return
+const ensureDebuggerAttached = async (tabId) => {
+  const targets = await getDebuggerTargets()
+  const target = targets.find((candidate) => candidate.tabId === tabId)
 
-  chrome.debugger.attach({ tabId }, '1.3', () => {
-    if (chrome.runtime.lastError) {
-      const message = chrome.runtime.lastError.message || ''
-      if (message.toLowerCase().includes('already attached')) {
-        applyDebuggerOverrides(tabId, timezone, locale, lat, lon, languages)
-      } else {
-        console.warn(`Debugger attach failed: ${message}`)
-      }
-      return
-    }
+  if (target?.attached) return true
 
-    applyDebuggerOverrides(tabId, timezone, locale, lat, lon, languages)
+  const response = await attachDebuggerTarget(tabId)
+  return response.ok
+}
+
+const attachDebugger = (
+  tabId,
+  timezone,
+  locale,
+  lat,
+  lon,
+  languages
+) => {
+  if (!hasDebuggerConfiguration(timezone, locale, lat, lon, languages)) {
+    return Promise.resolve(false)
+  }
+
+  return queueTabOperation(tabId, async () => {
+    if (!(await ensureDebuggerAttached(tabId))) return false
+
+    return applyDebuggerOverrides(
+      tabId,
+      timezone,
+      locale,
+      lat,
+      lon,
+      languages
+    )
   })
 }
 
-const detachDebuggerForTab = (tabId) => {
-  chrome.debugger.sendCommand(
-    { tabId },
-    'Emulation.clearGeolocationOverride',
-    {},
-    () => chrome.debugger.detach({ tabId }, () => {})
-  )
-}
+const detachDebuggerForTab = (tabId) =>
+  queueTabOperation(tabId, async () => {
+    const targets = await getDebuggerTargets()
+    const target = targets.find((candidate) => candidate.tabId === tabId)
 
-const detachDebugger = () => {
-  chrome.debugger.getTargets((tabs) => {
-    for (const tab in tabs) {
-      if (tabs[tab].attached && tabs[tab].tabId) {
-        detachDebuggerForTab(tabs[tab].tabId)
-      }
-    }
+    if (!target?.attached) return true
+
+    await sendCommand(tabId, 'Emulation.clearGeolocationOverride')
+    const response = await detachDebuggerTarget(tabId)
+    return response.ok || isExpectedLifecycleError(response.error)
   })
+
+const detachDebugger = async () => {
+  const targets = await getDebuggerTargets()
+  const tabIds = [
+    ...new Set(
+      targets
+        .filter((target) => target.attached && target.tabId)
+        .map((target) => target.tabId)
+    ),
+  ]
+
+  await Promise.all(tabIds.map(detachDebuggerForTab))
 }
 
 export { attachDebugger, detachDebugger, detachDebuggerForTab }
